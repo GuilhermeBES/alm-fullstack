@@ -1,0 +1,9 @@
+[submodule "alm-backend"]
+	path = alm-backend
+	url = https://github.com/GuilhermeBES/alm-backend.git
+[submodule "alm-frontend"]
+	path = alm-frontend
+	url = https://github.com/GuilhermeBES/alm-frontend.git
+[submodule "alm-banco-de-dados"]
+	path = alm-banco-de-dados
+	url = https://github.com/GuilhermeBES/alm-banco-de-dados.git
