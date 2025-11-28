@@ -1,0 +1,29 @@
+services:
+  alm-frontend:
+    build:
+      context: ./alm-frontend
+      dockerfile: ./Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8000
+    ports:
+      - "3000:80"
+    container_name: alm-frontend
+    environment:
+      VITE_API_URL: http://alm-backend:8000
+    depends_on:
+      - alm-backend
+
+  alm-backend:
+    build:
+      context: ./alm-backend/src
+      dockerfile: ./Dockerfile
+    ports:
+      - "8000:8000"
+    container_name: alm-backend
+    volumes:
+      - ./alm-backend/src:/code
+      - ./alm-banco-de-dados:/alm-banco-de-dados
+    env_file:
+      - ./alm-backend/src/.env.dev
+    environment:
+      - PYTHONPATH=/code
