@@ -34,7 +34,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+        with:
           submodules: recursive
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Initialize PyxLSTM submodule
+        run: |
+          cd alm-backend
+          git submodule update --init --recursive
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -82,6 +90,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Deploy via Docker Compose
         run: |
@@ -121,6 +131,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Create deployment
         uses: chrnorm/deployment-action@v2
