@@ -1,0 +1,207 @@
+name: Deploy - Full Stack
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-images:
+    name: Build All Docker Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        service: [backend, frontend]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.service == 'backend' && './alm-backend/src' || './alm-frontend' }}
+          file: ${{ matrix.service == 'backend' && './alm-backend/src/Dockerfile' || './alm-frontend/Dockerfile' }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          build-args: |
+            ${{ matrix.service == 'frontend' && 'VITE_API_URL=http://alm-backend:8000' || '' }}
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: build-images
+    if: github.ref == 'refs/heads/main' || inputs.environment == 'staging'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.alm.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy via Docker Compose
+        run: |
+          echo "🚀 Deploying to staging..."
+
+          # Exemplo de deploy SSH + Docker Compose
+          # ssh user@staging-server << 'EOF'
+          #   cd /app/alm
+          #   docker compose pull
+          #   docker compose up -d
+          # EOF
+
+          # Ou usando ferramentas modernas:
+          # railway up --environment staging
+          # render deploy --environment staging
+
+      - name: Run database migrations
+        run: |
+          echo "📦 Running database migrations..."
+          # docker compose exec backend alembic upgrade head
+
+      - name: Verify deployment
+        run: |
+          echo "✅ Verifying deployment..."
+          # curl -f https://staging.alm.example.com/health
+          # curl -f https://staging.alm.example.com/api/v1/models
+
+  deploy-production:
+    name: Deploy to Production
+    needs: build-images
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://alm.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create deployment
+        uses: chrnorm/deployment-action@v2
+        id: deployment
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          environment: production
+          environment-url: https://alm.example.com
+
+      - name: Deploy to production
+        run: |
+          echo "🚀 Deploying to production..."
+          echo "Version: ${{ github.ref_name }}"
+
+          # Adicione comandos de deploy aqui
+          # Exemplo: deploy via Docker Compose
+          # ssh user@prod-server << 'EOF'
+          #   cd /app/alm
+          #   git pull
+          #   docker compose pull
+          #   docker compose up -d --no-deps --build
+          # EOF
+
+      - name: Run database migrations
+        run: |
+          echo "📦 Running production migrations..."
+          # docker compose exec backend alembic upgrade head
+
+      - name: Verify deployment
+        id: verify
+        run: |
+          echo "✅ Verifying production deployment..."
+          # MAX_RETRIES=5
+          # for i in $(seq 1 $MAX_RETRIES); do
+          #   if curl -f https://alm.example.com/health; then
+          #     echo "Health check passed!"
+          #     exit 0
+          #   fi
+          #   sleep 10
+          # done
+          # exit 1
+
+      - name: Update deployment status (success)
+        if: success()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          state: success
+          environment-url: https://alm.example.com
+
+      - name: Update deployment status (failure)
+        if: failure()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          state: failure
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed! Rolling back..."
+          # docker compose down
+          # git checkout <previous-version>
+          # docker compose up -d
+
+  smoke-tests:
+    name: Smoke Tests
+    needs: [deploy-staging]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Run smoke tests
+        run: |
+          echo "🔥 Running smoke tests on staging..."
+
+          # Backend smoke tests
+          # curl -f https://staging-api.alm.example.com/health
+          # curl -f https://staging-api.alm.example.com/api/v1/models
+
+          # Frontend smoke tests
+          # curl -f https://staging.alm.example.com

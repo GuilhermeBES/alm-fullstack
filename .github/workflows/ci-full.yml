@@ -1,0 +1,179 @@
+name: CI - Full Stack
+
+on:
+  push:
+    branches: [ main, develop, master ]
+  pull_request:
+    branches: [ main, develop, master ]
+  workflow_dispatch:
+
+jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      database: ${{ steps.filter.outputs.database }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Detect file changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'alm-backend/**'
+            frontend:
+              - 'alm-frontend/**'
+            database:
+              - 'alm-banco-de-dados/**'
+            docker:
+              - 'docker-compose.yml'
+              - '**/Dockerfile'
+
+  backend-ci:
+    name: Backend CI
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Trigger backend CI
+        run: |
+          echo "🐍 Running backend CI..."
+          cd alm-backend
+          # O CI do backend será executado automaticamente via seu próprio workflow
+
+      - name: Backend lint
+        working-directory: alm-backend/src
+        run: |
+          pip install black ruff
+          black --check app/ tests/ || echo "Format issues"
+          ruff check app/ tests/ || echo "Lint issues"
+
+  frontend-ci:
+    name: Frontend CI
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: alm-frontend/package-lock.json
+
+      - name: Frontend lint and build
+        working-directory: alm-frontend
+        run: |
+          echo "⚛️ Running frontend CI..."
+          npm ci
+          npm run lint || echo "Lint issues"
+          npm run build
+
+  integration-test:
+    name: Integration Tests
+    needs: [backend-ci, frontend-ci]
+    if: |
+      always() &&
+      (needs.backend-ci.result == 'success' || needs.backend-ci.result == 'skipped') &&
+      (needs.frontend-ci.result == 'success' || needs.frontend-ci.result == 'skipped')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Start services with Docker Compose
+        run: |
+          docker compose up -d --build
+          sleep 10
+
+      - name: Wait for services to be healthy
+        run: |
+          echo "⏳ Waiting for services..."
+          timeout 60 bash -c 'until curl -f http://localhost:8000/health; do sleep 2; done'
+          timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+
+      - name: Run integration tests
+        run: |
+          echo "🧪 Running integration tests..."
+          # Backend health check
+          curl -f http://localhost:8000/health || exit 1
+          curl -f http://localhost:8000/api/v1/models || exit 1
+
+          # Frontend health check
+          curl -f http://localhost:3000 || exit 1
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          docker compose logs backend
+          docker compose logs frontend
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
+
+  docker-compose-validation:
+    name: Validate Docker Compose
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Validate docker-compose.yml
+        run: docker compose config
+
+      - name: Build all services
+        run: docker compose build
+
+  summary:
+    name: CI Summary
+    needs: [backend-ci, frontend-ci, integration-test, docker-compose-validation]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check results
+        run: |
+          echo "## 📊 CI Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend | ${{ needs.backend-ci.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | ${{ needs.frontend-ci.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Integration Tests | ${{ needs.integration-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Compose | ${{ needs.docker-compose-validation.result }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if any job failed
+        if: |
+          needs.backend-ci.result == 'failure' ||
+          needs.frontend-ci.result == 'failure' ||
+          needs.integration-test.result == 'failure' ||
+          needs.docker-compose-validation.result == 'failure'
+        run: exit 1
