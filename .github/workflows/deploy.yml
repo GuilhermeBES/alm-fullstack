@@ -165,7 +165,8 @@ jobs:
           environment: production
           environment-url: https://alm.example.com
           production-environment: true
-          auto-inactive: false
+          auto-inactive: true
+          transient-environment: false
 
       - name: Deploy to production
         run: |
