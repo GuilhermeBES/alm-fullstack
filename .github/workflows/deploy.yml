@@ -139,6 +139,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           environment: production
           environment-url: https://alm.example.com
+          production-environment: true
+          auto-inactive: false
 
       - name: Deploy to production
         run: |
@@ -181,6 +183,7 @@ jobs:
           deployment-id: ${{ steps.deployment.outputs.deployment_id }}
           state: success
           environment-url: https://alm.example.com
+          auto-inactive: false
 
       - name: Update deployment status (failure)
         if: failure()
