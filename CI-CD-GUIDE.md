@@ -1,341 +1,303 @@
-# 🚀 Guia de CI/CD - ALM Project
+# Guia de CI/CD
 
-## 📋 Índice
-- [Visão Geral](#visão-geral)
-- [Estrutura de Workflows](#estrutura-de-workflows)
-- [Configuração Inicial](#configuração-inicial)
-- [Como Usar](#como-usar)
-- [Secrets Necessários](#secrets-necessários)
-- [Ambientes](#ambientes)
-- [Troubleshooting](#troubleshooting)
+Este guia explica o pipeline de integração contínua e deploy da aplicação ALM Full Stack.
 
----
+## Visão Geral
 
-## 🎯 Visão Geral
+O projeto utiliza GitHub Actions para automatizar testes, build e deploy. O pipeline é dividido em dois workflows principais:
 
-O projeto ALM possui um pipeline completo de CI/CD distribuído em 3 níveis:
+- **Workflow de CI**: Executa testes e validações nas mudanças de código
+- **Workflow de Deploy**: Constrói imagens Docker e faz deploy em staging ou produção
 
-1. **Backend** (`alm-backend/.github/workflows/`)
-   - CI: Lint, testes, security scan, build Docker
-   - CD: Push para GHCR, deploy staging/production
+## Workflows
 
-2. **Frontend** (`alm-frontend/.github/workflows/`)
-   - CI: Lint, type check, testes, build
-   - CD: Push para GHCR, deploy staging/production
+### Workflow de CI (CI - Full Stack)
 
-3. **Monorepo** (`.github/workflows/`)
-   - CI Full: Orquestra CIs de todos os submódulos
-   - Deploy: Deploy coordenado de toda stack
+O workflow de CI roda automaticamente quando você faz push de código para os branches principais ou cria pull requests. Ele executa os seguintes passos:
 
----
+1. **Detecção de Mudanças**: Analisa quais partes do código mudaram (backend, frontend ou banco de dados)
+2. **CI do Backend**: Executa verificações de linting com Black e Ruff no código Python
+3. **CI do Frontend**: Instala dependências, executa linting e faz build da aplicação React
+4. **Testes de Integração**: Inicia todos os serviços com Docker Compose e verifica se funcionam juntos
+5. **Validação do Docker Compose**: Garante que a configuração do docker-compose.yml está válida
 
-## 📁 Estrutura de Workflows
+O workflow de CI está configurado para não executar quando você cria tags de versão. Isso evita execuções duplicadas ao fazer deploy em produção.
 
-```
-ALM/
-├── .github/workflows/
-│   ├── ci-full.yml          # CI completo (orquestrador)
-│   └── deploy.yml           # Deploy coordenado
-│
-├── alm-backend/.github/workflows/
-│   ├── ci.yml               # CI do backend
-│   └── cd.yml               # CD do backend
-│
-└── alm-frontend/.github/workflows/
-    ├── ci.yml               # CI do frontend
-    └── cd.yml               # CD do frontend
-```
+#### Quando o CI Roda
 
----
+- Push para os branches main, develop ou master
+- Pull requests direcionados para main, develop ou master
+- Acionamento manual via interface do GitHub Actions
 
-## ⚙️ Configuração Inicial
+#### Quando o CI Não Roda
 
-### 1. Habilitar GitHub Actions
+- Push de tags de versão (v1.0.0, v1.2.3, etc.)
 
-Nos **3 repositórios** (ALM, alm-backend, alm-frontend):
+### Workflow de Deploy (Deploy - Full Stack)
 
-1. Acesse: `Settings` → `Actions` → `General`
-2. Habilite: **Allow all actions and reusable workflows**
-3. Em **Workflow permissions**, selecione: **Read and write permissions**
+O workflow de deploy cuida da construção de imagens Docker e do deploy da aplicação. Ele consiste em vários jobs:
 
-### 2. Configurar Secrets
+#### 1. Build de Imagens Docker
 
-#### No repositório principal (ALM):
+Constrói imagens Docker separadas para os serviços de backend e frontend. Cada imagem é tagueada com múltiplos formatos:
 
-```bash
-# GitHub Settings → Secrets and variables → Actions → New repository secret
-```
+- Nome do branch (para pushes de branches)
+- Versão semântica (para releases tagueadas)
+- SHA do commit Git
+- `latest` (para o branch padrão)
 
-**Secrets necessários:**
+As imagens são enviadas para o GitHub Container Registry em `ghcr.io/guilhermebes/alm-fullstack/`.
 
-| Secret | Descrição | Exemplo |
-|--------|-----------|---------|
-| `API_URL` | URL da API em produção | `https://api.alm.com` |
-| `DEPLOY_SSH_KEY` | Chave SSH para deploy | (chave privada) |
-| `DEPLOY_HOST` | Host do servidor | `user@prod-server.com` |
+#### 2. Deploy para Staging
 
-#### Nos submódulos (alm-backend, alm-frontend):
+Roda automaticamente quando código é enviado para o branch main. Este job:
 
-Os secrets são herdados do repositório principal, mas você pode adicionar secrets específicos se necessário.
+- Faz checkout do código mais recente
+- Executa comandos de deploy (atualmente passos de exemplo)
+- Executa migrações do banco de dados
+- Verifica se o deploy foi bem-sucedido
 
-### 3. Configurar Ambientes
+#### 3. Deploy para Produção
 
-Criar ambientes no GitHub:
+Dispara apenas quando você cria uma tag de versão começando com `v` (por exemplo, v1.0.0). Este job:
 
-1. `Settings` → `Environments` → `New environment`
-2. Criar 2 ambientes:
-   - **staging** (sem proteção)
-   - **production** (com aprovação manual)
+- Cria um registro de deployment no GitHub
+- Executa comandos de deploy de produção
+- Executa migrações do banco de dados
+- Verifica o deployment
+- Atualiza o status do deployment
+- Faz rollback automaticamente se o deploy falhar
 
-Para **production**:
-- Ativar **Required reviewers** (1-2 pessoas)
-- Adicionar **Deployment branches**: somente tags `v*`
+#### 4. Smoke Tests
 
----
+Roda após o deploy de staging para verificar funcionalidades básicas da aplicação deployada.
 
-## 🎮 Como Usar
+## Criando uma Release de Produção
 
-### CI (Execução Automática)
+Siga estes passos para fazer deploy de uma nova versão em produção:
 
-#### Quando é executado:
-- ✅ Push para `main`, `develop`, ou `feat/*`
-- ✅ Pull Request para `main` ou `develop`
-- ✅ Manualmente via GitHub UI
+### Passo 1: Garantir que o Código Está Pronto
 
-#### O que faz:
+Certifique-se de que todas as mudanças estão commitadas e enviadas para o branch main. O workflow de CI deve ter sido concluído com sucesso.
 
-**Backend CI:**
-```yaml
-1. Lint (Black + Ruff)
-2. Type check (MyPy)
-3. Tests (pytest) em Python 3.11 e 3.13
-4. Coverage report
-5. Security scan (Bandit)
-6. Build Docker image
-```
+### Passo 2: Criar uma Tag de Versão
 
-**Frontend CI:**
-```yaml
-1. Lint (ESLint)
-2. Type check (TypeScript)
-3. Tests (Vitest) em Node 18 e 20
-4. Build production
-5. Build Docker image
-```
+Escolha um número de versão semântica apropriado seguindo o formato `vMAJOR.MINOR.PATCH`:
 
-**CI Full (Monorepo):**
-```yaml
-1. Detecta mudanças
-2. Executa CI do backend (se alterado)
-3. Executa CI do frontend (se alterado)
-4. Testes de integração (Docker Compose)
-5. Valida docker-compose.yml
-```
+- **MAJOR**: Incrementar para mudanças que quebram compatibilidade
+- **MINOR**: Incrementar para novas funcionalidades (compatíveis com versões anteriores)
+- **PATCH**: Incrementar para correções de bugs
 
-### CD (Deploy)
-
-#### Deploy para Staging
-
-**Trigger:** Push para `main`
+Crie e envie a tag:
 
 ```bash
-git push origin main
-```
-
-Fluxo:
-1. ✅ CI passa
-2. 🏗️ Build das imagens Docker
-3. 📤 Push para `ghcr.io/seu-usuario/alm/*`
-4. 🚀 Deploy automático para staging
-5. ✅ Health checks
-
-#### Deploy para Production
-
-**Trigger:** Criar tag `v*`
-
-```bash
-# 1. Criar tag
-git tag v1.0.0
-
-# 2. Push da tag
+git tag -a v1.0.0 -m "Release version 1.0.0"
 git push origin v1.0.0
 ```
 
-Fluxo:
-1. ✅ CI passa
-2. 🏗️ Build das imagens
-3. 📤 Push com tag versionada
-4. ⏸️ **Aguarda aprovação manual**
-5. 🚀 Deploy para produção
-6. ✅ Health checks
-7. ↩️ Rollback automático se falhar
+### Passo 3: Monitorar o Deploy
 
----
-
-## 🔐 Secrets Necessários
-
-### Obrigatórios (já fornecidos pelo GitHub):
-
-- `GITHUB_TOKEN` - Token automático do GitHub
-- `GITHUB_ACTOR` - Usuário que disparou o workflow
-
-### Opcionais (para deploy real):
-
-#### Para deploy SSH:
+O workflow de deploy iniciará automaticamente. Você pode monitorar o progresso:
 
 ```bash
-# Gerar chave SSH
-ssh-keygen -t ed25519 -C "github-actions"
-
-# Adicionar como secret
-gh secret set DEPLOY_SSH_KEY < ~/.ssh/id_ed25519
-gh secret set DEPLOY_HOST --body "user@servidor.com"
+gh run list --limit 5
+gh run watch <run-id>
 ```
 
-#### Para serviços cloud:
+Ou visualizar na aba Actions do seu repositório no GitHub.
+
+### Passo 4: Verificar o Deploy
+
+Quando o workflow for concluído, verifique se:
+
+- Ambas as imagens Docker foram construídas com sucesso
+- O job de deploy de produção foi concluído
+- Todos os passos de verificação passaram
+
+Você pode ver os detalhes do deploy com:
 
 ```bash
-# AWS
-gh secret set AWS_ACCESS_KEY_ID --body "AKIA..."
-gh secret set AWS_SECRET_ACCESS_KEY --body "..."
-
-# Railway
-gh secret set RAILWAY_TOKEN --body "..."
-
-# Render
-gh secret set RENDER_API_KEY --body "..."
+gh run view <run-id>
 ```
 
----
-
-## 🌍 Ambientes
+## Ambientes
 
 ### Staging
 
-- **URL:** `https://staging.alm.example.com`
-- **Deploy:** Automático em push para `main`
-- **Database:** Banco de dados de staging (separado)
-- **Purpose:** Testes antes de produção
+O ambiente de staging é usado para testar mudanças antes de chegarem à produção. Faz deploy automaticamente quando código é enviado para o branch main.
 
-### Production
+- **URL do Ambiente**: https://staging.alm.example.com (exemplo)
+- **Gatilho**: Push para o branch main
+- **Propósito**: Testes e validação pré-produção
 
-- **URL:** `https://alm.example.com`
-- **Deploy:** Manual, via tags `v*`
-- **Database:** Banco de dados de produção
-- **Protection:** Requer aprovação manual
+### Produção
 
----
+O ambiente de produção serve usuários reais e deve receber apenas código completamente testado.
 
-## 🎛️ Executar Manualmente
+- **URL do Ambiente**: https://alm.example.com (exemplo)
+- **Gatilho**: Tags de versão (v*)
+- **Propósito**: Aplicação em produção servindo usuários finais
+- **Proteção**: Inclui rollback automático em caso de falha
 
-### Via GitHub UI:
+## Imagens Docker
 
-1. Acesse: `Actions` → Selecione workflow
-2. Clique em: `Run workflow`
-3. Escolha a branch
-4. Clique em: `Run workflow`
+Cada deploy constrói duas imagens Docker:
 
-### Via GitHub CLI:
+### Imagem do Backend
+
+Construída a partir de `alm-backend/src/Dockerfile` e inclui:
+
+- Código da aplicação Python
+- Submódulo PyxLSTM
+- Servidor FastAPI
+- Modelos e migrações do banco de dados
+
+### Imagem do Frontend
+
+Construída a partir de `alm-frontend/Dockerfile` e inclui:
+
+- Aplicação React
+- Configuração de build do Vite
+- Assets otimizados para produção
+
+Ambas as imagens são armazenadas no GitHub Container Registry e podem ser baixadas com:
 
 ```bash
-# CI Full
-gh workflow run ci-full.yml
-
-# Deploy específico
-gh workflow run deploy.yml -f environment=staging
-
-# Ver status
-gh run list --workflow=ci-full.yml
+docker pull ghcr.io/guilhermebes/alm-fullstack/backend:v1.0.0
+docker pull ghcr.io/guilhermebes/alm-fullstack/frontend:v1.0.0
 ```
 
----
+## Resumo do Comportamento dos Workflows
 
-## 🐛 Troubleshooting
+| Evento | CI Roda | Deploy Roda | Deploy Staging | Deploy Produção |
+|--------|---------|-------------|----------------|-----------------|
+| Push para main | Sim | Sim | Sim | Não |
+| Pull request | Sim | Não | Não | Não |
+| Push tag v* | Não | Sim | Não | Sim |
+| Acionamento manual | Sim | Sim | Configurável | Configurável |
 
-### Erro: "Permission denied"
+## Tarefas Comuns
 
-**Solução:**
+### Fazendo Deploy de um Hotfix
+
+1. Crie um branch a partir da última tag de produção
+2. Faça as mudanças necessárias
+3. Crie um pull request para main
+4. Após o merge, crie uma nova tag de versão patch (ex: v1.0.1)
+
+### Fazendo Rollback de um Deploy
+
+Se um deploy de produção falhar, o workflow tentará fazer rollback automaticamente. Para rollback manual:
+
+1. Identifique a última tag de versão que estava funcionando
+2. Crie uma nova tag apontando para aquele commit:
+
 ```bash
-# No repositório, vá em:
-Settings → Actions → General → Workflow permissions
-# Selecione: "Read and write permissions"
+git tag -a v1.0.2 <commit-anterior-funcionando> -m "Rollback para versão anterior"
+git push origin v1.0.2
 ```
 
-### Erro: "Submodule checkout failed"
+### Visualizando Histórico de Deploys
 
-**Solução:**
-Os workflows já incluem `submodules: recursive`. Verifique se os submódulos estão acessíveis.
-
-### Build Docker falha
-
-**Verificar:**
 ```bash
-# Local test
-docker compose build
-docker compose up
+gh run list --workflow=deploy.yml --limit 20
 ```
 
-### Tests falhando
+### Verificando Logs de Build
 
-**Debug local:**
 ```bash
-# Backend
+gh run view <run-id> --log
+```
+
+## Solução de Problemas
+
+### Workflow de CI Falha no Linting
+
+Revise os erros de linting nos logs do workflow e corrija-os localmente:
+
+```bash
+# Linting do backend
 cd alm-backend/src
-pytest tests/ -v
+black app/ tests/
+ruff check app/ tests/ --fix
 
-# Frontend
+# Linting do frontend
 cd alm-frontend
-npm test
+npm run lint -- --fix
 ```
 
-### Deploy não acontece
+### Build do Docker Falha
 
-**Verificar:**
-1. ✅ CI passou?
-2. ✅ Tag criada corretamente? (`v1.0.0`)
-3. ✅ Secrets configurados?
-4. ✅ Ambiente production criado?
+Causas comuns:
 
----
+- Inicialização de submódulo faltando
+- Sintaxe inválida do Dockerfile
+- Dependências de build faltando
 
-## 📊 Status Badges
+Verifique os logs de build para mensagens de erro específicas.
 
-Adicione badges ao README:
+### Workflow de Deploy Não Dispara
 
-```markdown
-[![CI - Full Stack](https://github.com/SEU-USUARIO/ALM/actions/workflows/ci-full.yml/badge.svg)](https://github.com/SEU-USUARIO/ALM/actions/workflows/ci-full.yml)
-[![Deploy](https://github.com/SEU-USUARIO/ALM/actions/workflows/deploy.yml/badge.svg)](https://github.com/SEU-USUARIO/ALM/actions/workflows/deploy.yml)
+Verifique se:
+
+- A tag segue o formato correto (começa com 'v')
+- A tag foi enviada para o repositório remoto
+- A sintaxe do arquivo de workflow está válida
+
+### Imagens Não Encontradas no Registry
+
+Certifique-se de ter as permissões corretas para acessar o GitHub Container Registry. Você pode precisar se autenticar:
+
+```bash
+echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
 ```
 
----
+## Customização
 
-## 🚀 Próximos Passos
+### Atualizando URLs dos Ambientes
 
-1. **Configurar deploy real:**
-   - Adicionar comandos SSH/API no `deploy.yml`
-   - Configurar secrets de produção
+Edite `.github/workflows/deploy.yml` e atualize as URLs dos ambientes:
 
-2. **Adicionar testes E2E:**
-   - Playwright/Cypress
-   - Rodar após deploy staging
+```yaml
+environment:
+  name: production
+  url: https://seu-dominio-real.com
+```
 
-3. **Monitoring:**
-   - Integrar Sentry/DataDog
-   - Alertas de falha
+### Adicionando Passos de Deploy
 
-4. **Performance:**
-   - Lighthouse CI para frontend
-   - Load tests para backend
+Os jobs de deploy atualmente contêm passos de exemplo. Substitua os comandos echo por comandos reais de deploy:
 
----
+```yaml
+- name: Deploy to production
+  run: |
+    ssh user@prod-server << 'EOF'
+      cd /app/alm
+      docker compose pull
+      docker compose up -d
+    EOF
+```
 
-## 📚 Recursos
+### Configurando Ambientes Protegidos
 
-- [GitHub Actions Docs](https://docs.github.com/en/actions)
-- [Docker Build Push Action](https://github.com/docker/build-push-action)
-- [GitHub Environments](https://docs.github.com/en/actions/deployment/targeting-different-environments)
+No GitHub, navegue até Settings > Environments para configurar:
 
----
+- Revisores obrigatórios antes do deploy
+- Restrições de branch para deploy
+- Secrets do ambiente
 
-**Última atualização:** Dezembro 2024
-**Versão:** 1.0.0
+## Melhores Práticas
+
+1. **Sempre teste em staging primeiro**: Deixe as mudanças rodarem em staging antes de criar uma tag de produção
+2. **Use versionamento semântico**: Siga os princípios de semver para números de versão
+3. **Escreva mensagens de tag significativas**: Descreva o que está incluído na release
+4. **Monitore os deploys**: Acompanhe a execução do workflow para identificar problemas cedo
+5. **Mantenha os workflows atualizados**: Revise e atualize as configurações dos workflows conforme o projeto evolui
+6. **Documente procedimentos de deploy**: Mantenha este guia atualizado com quaisquer passos customizados de deploy
+
+## Recursos Adicionais
+
+- [Documentação do GitHub Actions](https://docs.github.com/en/actions)
+- [Documentação do Docker](https://docs.docker.com/)
+- [Versionamento Semântico](https://semver.org/)
+- [GitHub Container Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
