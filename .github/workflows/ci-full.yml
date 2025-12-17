@@ -3,6 +3,8 @@ name: CI - Full Stack
 on:
   push:
     branches: [ main, develop, master ]
+    tags-ignore:
+      - '**'
   pull_request:
     branches: [ main, develop, master ]
   workflow_dispatch:
