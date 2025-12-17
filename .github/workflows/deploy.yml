@@ -142,7 +142,10 @@ jobs:
   deploy-production:
     name: Deploy to Production
     needs: build-images
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.environment == 'production'
+    if: |
+      always() &&
+      (needs.build-images.result == 'success') &&
+      (startsWith(github.ref, 'refs/tags/v') || inputs.environment == 'production')
     runs-on: ubuntu-latest
     environment:
       name: production
